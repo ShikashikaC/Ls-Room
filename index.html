@@ -823,24 +823,70 @@ function liveDone(body){
 
 /* 被他删掉的路：左见和林创各算各的 */
 var PLEA_SOFT = 6, PLEA_AT = 12;   // 求到第几次他开始动摇、第几次松口
-var pendingPeek = [];
+var pendingPeek = [], pendingFree = [];
 /* 这一句是不是在为被删掉的路求他。提到了人或地方就只算那一边，没提就两边都算 */
 function countPlea(text){
-  pendingPeek = [];
+  pendingPeek = []; pendingFree = [];
   var t = String(text);
-  if(!/求|拜托|好不好|好嘛|好吗|可以吗|行不行|让我|想去|想见|想看|还给|恢复|打开|放我|就一次|一眼|一下下|嘛|呜|qwq|QAQ/.test(t)) return;
+  if(!/求|拜托|好不好|好嘛|好吗|可以吗|行不行|能不能|可不可以|让我|想去|想见|想看|想找|想和|想跟|还给|还回|放回|加回|弄回|变回|恢复|解锁|解除|解开|撤销|打开|放我|就一次|一眼|一下下|一句|我错了|对不起|原谅|再也不|保证|答应|嘛|呜|qwq|QAQ|怎么没|怎么还|怎么不|为什么没|为什么不|为什么我|为什么只|不是说|说不了|不能说|不能聊|发不出|只能看|光看|难受|好想|想说/i.test(t)) return;
   var named = OTHER_IDS.filter(function(id){ return t.indexOf(OTHERS[id].name) >= 0 || t.indexOf(OTHERS[id].place) >= 0; });
-  var general = /那边|那里|外面|出去|出门|路|门|入口|他们|别人|见人/.test(t);
+  var general = /那边|那里|外面|出去|出门|路|门|入口|选项|按钮|按键|他们|别人|见人|删掉|删了|删除|恢复|解锁|放回|还回|还给|加回|弄回/.test(t);
+  var talk = /说话|说句话|讲话|聊天|聊|开口|出声|声音|听不见|听不到|打字|输入|只能看|光看|看不见我/.test(t);
   OTHER_IDS.forEach(function(id){
     var p = state.zj.c[id];
-    if(!p.locked || p.peek) return;
-    if(named.length ? named.indexOf(id) < 0 : !general) return;
-    p.pleas++;
-    if(p.pleas >= PLEA_AT) pendingPeek.push(id);
+    if(!p.locked) return;
+    if(!p.peek){            // 路还删着：求他把路还回来
+      if(named.length ? named.indexOf(id) < 0 : !general) return;
+      p.pleas++;
+      if(p.pleas >= PLEA_AT) pendingPeek.push(id);
+    }else{                  // 路回来了但说不了话：求他让自己开口
+      if(named.length ? named.indexOf(id) < 0 : !(talk || general)) return;
+      p.pleas2 = (p.pleas2 || 0) + 1;
+      if(p.pleas2 >= PLEA_AT) pendingFree.push(id);
+    }
   });
   saveZj();
 }
+/* 彻底放开：可以去，也可以说话，次数从头算 */
+function setFree(id){
+  var p = state.zj.c[id];
+  p.locked = false; p.peek = false; p.caught = 0; p.pleas = 0; p.pleas2 = 0; p.freed = true;
+}
+/* 他这句话里有没有说“路已经还给你了”。有的话返回是哪几条路。
+   否定的句子（“不会还给你”“别想”）不算；提到了人或地方就只算那一边，没提就算所有还删着的 */
+function saidBack(body){
+  var locked = OTHER_IDS.filter(function(id){ var p = state.zj.c[id]; return p.locked && !p.peek; });
+  if(!locked.length) return [];
+  var hit = [];
+  String(body).replace(/\*[^*\n]*\*/g, "").split(/[。！？!?\n；;]/).forEach(function(s){
+    if(!/(已经|都)?(还给你|还回去|还回来|放回去|放回来|放回|恢复|打开)了|你可以去了|可以去了|门.{0,4}开了|路.{0,6}(还|回来|通)了|入口.{0,6}(回来|有)了/.test(s)) return;
+    if(/不会|不可能|不能|不许|不准|别想|休想|没有|还没|才不|不打算|不想|除非|如果|要是|等你|再说|以后/.test(s)) return;
+    var named = locked.filter(function(id){ return s.indexOf(OTHERS[id].name) >= 0 || s.indexOf(OTHERS[id].place) >= 0; });
+    (named.length ? named : locked).forEach(function(id){ if(hit.indexOf(id) < 0) hit.push(id); });
+  });
+  return hit;
+}
+/* 他这句话里有没有说“可以和他说话了”。规则同上，只看已经能去、但还说不了话的那几条路 */
+function saidFree(body){
+  var held = OTHER_IDS.filter(function(id){ var p = state.zj.c[id]; return p.locked && p.peek; });
+  if(!held.length) return [];
+  var hit = [];
+  String(body).replace(/\*[^*\n]*\*/g, "").split(/[。！？!?\n；;]/).forEach(function(s){
+    if(!/(可以|能)(和|跟|对)?.{0,8}(说话|讲话|聊天|聊|开口)了|(声音|嗓子).{0,6}还给你|解开了|(让|许|准)你.{0,6}(说话|开口|聊)了/.test(s)) return;
+    if(/不会|不可能|不能|不许|不准|别想|休想|没有|还没|才不|不打算|不想|除非|如果|要是|等你|再说|以后/.test(s)) return;
+    var named = held.filter(function(id){ return s.indexOf(OTHERS[id].name) >= 0 || s.indexOf(OTHERS[id].place) >= 0; });
+    (named.length ? named : held).forEach(function(id){ if(hit.indexOf(id) < 0) hit.push(id); });
+  });
+  return hit;
+}
 function pleaNote(){
+  if(pendingFree.length){
+    var fs = pendingFree.map(function(id){ return OTHERS[id]; });
+    return "\n她去了" + fs.map(function(o){ return o.place; }).join("和") + "才发现说不了话，回来以后又求了你很多次，一直没有放弃。这一次你彻底松口了：告诉她，解开了，她可以和" +
+      fs.map(function(o){ return o.name; }).join("和") + "说话了。你很不情愿，醋意藏不住，但你不想再看她这样求你。你答应她：以后她去那里，你不会再去把她带回来了。你只要她记得回到你身边。";
+  }
+  var soft2 = OTHER_IDS.filter(function(id){ var p = state.zj.c[id]; return p.locked && p.peek && (p.pleas2 || 0) >= PLEA_SOFT; });
+  if(soft2.length) return "\n她为了能和别人说上话已经求过你好几次了。你还没有答应，但开始有一点动摇，藏不太住。";
   if(pendingPeek.length){
     var os = pendingPeek.map(function(id){ return OTHERS[id]; });
     return "\n为了去" + os.map(function(o){ return o.place; }).join("和") + "的路，她已经求了你很多次，一直没有放弃。这一次你松口了：不情愿地告诉她，路还给她了，可以去。其实你动了手脚：她去了只能远远看着" +
@@ -867,11 +913,14 @@ function lockedNote(){
   var back = OTHER_IDS.filter(function(id){ return state.zj.c[id].locked && state.zj.c[id].peek; }).map(function(id){ return OTHERS[id]; });
   var gone = OTHER_IDS.filter(function(id){ return state.zj.c[id].locked && !state.zj.c[id].peek; }).map(function(id){ return OTHERS[id]; });
   var note = "";
+  var freed = OTHER_IDS.filter(function(id){ var q = state.zj.c[id]; return q.freed && !q.locked; }).map(function(id){ return OTHERS[id]; });
+  if(freed.length) note += "\n去" + freed.map(function(o){ return o.place; }).join("和") + "的路你删掉过，后来被她求得没办法，又全部还给了她：现在她可以去，也可以和" +
+    freed.map(function(o){ return o.name; }).join("和") + "说话，你也答应了不会再去把她带回来。你说到做到，不反悔，但她每次回来你还是会吃醋，想把她的注意力要回来。";
   if(back.length) note += "\n去" + back.map(function(o){ return o.place; }).join("和") + "的路你曾经删掉过，后来她求了你很久，你还给了她，却没有告诉她：她去了只能远远看着" +
-    back.map(function(o){ return o.name; }).join("和") + "，说不了话。她来质问时，你带着笑承认是故意的——你只答应了让她去，没答应让她和别人说话。不道歉，这个条件也不会再放宽。";
+    back.map(function(o){ return o.name; }).join("和") + "，说不了话。她来质问时，你带着笑承认是故意的——你只答应了让她去，没答应让她和别人说话。不道歉。现在她还是说不了话：这一次无论她怎么求，你都不可以说“解开了”“你可以和他说话了”这类话，说了就是骗她。可以心软、可以说“再说”“看你表现”，但不能说已经解开了。";
   if(!gone.length) return note;
   return note + "\n她去" + gone.map(function(o){ return o.place; }).join("和") + "的路已经被你从这个世界里删掉了，她再也见不到" +
-    gone.map(function(o){ return o.name; }).join("和") + "。她问起时，你平静地承认是你做的，不道歉，也不会把路还回去。";
+    gone.map(function(o){ return o.name; }).join("和") + "。她问起时，你平静地承认是你做的，不道歉。路现在还是删着的：画面上那个入口并没有回来，所以这一次无论她怎么求、怎么哄，你都不可以说“已经还给你了”“放回去了”“恢复了”“你可以去了”这类话，说了就是骗她。你可以心软、可以动摇、可以说“再说”“看你表现”“再求求我”，但不能说已经还了。";
 }
 function buildInput(){
   var recent = state.msgs.filter(function(m){ return m.r === "me" || m.r === "l" || m.r === "ev"; }).slice(-MAX_SEND);
@@ -1012,6 +1061,13 @@ function takeL(res, live){
   state.msgs.push(mine);
   saveChat();
   state.touch = {head:0, face:0, body:0}; lsSet("touch", state.touch);   // 他已经知道了
+  saidFree(body).forEach(function(id){ if(pendingFree.indexOf(id) < 0) pendingFree.push(id); });
+  if(pendingFree.length){
+    pendingFree.forEach(setFree);
+    pendingFree = [];
+    saveZj(); renderScene();
+  }
+  saidBack(body).forEach(function(id){ if(pendingPeek.indexOf(id) < 0) pendingPeek.push(id); });
   if(pendingPeek.length){
     pendingPeek.forEach(function(id){ state.zj.c[id].peek = true; });
     pendingPeek = [];
@@ -1123,7 +1179,7 @@ var OTHERS = {
   }
 };
 var OTHER_IDS = Object.keys(OTHERS);
-function newOne(id){ return { msgs:[], n:0, full:false, visits:0, expr: OTHERS[id].first, caught:0, locked:false, pleas:0, peek:false, hair:null, did:false, game:null, q:"", booth:false }; }
+function newOne(id){ return { msgs:[], n:0, full:false, visits:0, expr: OTHERS[id].first, caught:0, locked:false, pleas:0, peek:false, pleas2:0, freed:false, hair:null, did:false, game:null, q:"", booth:false }; }
 function newZj(){
   var z = { on:false, c:{} };
   OTHER_IDS.forEach(function(id){ z.c[id] = newOne(id); });
@@ -1235,9 +1291,12 @@ function talkOther(text){
   if(!text) return;
   if(p.locked){ showNote("你张了张嘴，却发不出声音。\n他没有往这边看。"); return; }
   if(cur.hook) cur.hook(cur.beats.length - 1);   // 编头发的那几段没点完就开口：直接算编好了
-  if(p.full){ forceBack("limit", text); return; }
-  // 真心话的那一问一答里难免出现“喜欢”这类词：这时只有明确冲着他去的才算
-  if(p.game ? toHim(text) : intimate(text)){ forceBack("intimate", text); return; }
+  // 他彻底放开过的地方：想聊多久聊多久，说什么他都不会再来带人
+  if(!p.freed){
+    if(p.full){ forceBack("limit", text); return; }
+    // 真心话的那一问一答里难免出现“喜欢”这类词：这时只有明确冲着他去的才算
+    if(p.game ? toHim(text) : intimate(text)){ forceBack("intimate", text); return; }
+  }
   var inGame = p.game;
   p.msgs.push({r:"me", t:text, ts:Date.now()}); saveZj();
   cur = { who:"me", beats:[[{t:text}]], i:0, streaming:true };
@@ -1253,7 +1312,7 @@ function talkOther(text){
     p.expr = r.expr || p.expr;
     p.n++;
     if(inGame && p.game === inGame){ p.game = null; p.q = ""; }
-    if(p.n >= ZJ_MAX) p.full = true;
+    if(p.n >= ZJ_MAX && !p.freed) p.full = true;
     p.msgs.push({r:"o", e:p.expr, t:body, ts:Date.now()});
     p.msgs = p.msgs.slice(-40);
     saveZj();
@@ -1308,7 +1367,7 @@ function showdown(kind, quote){
 }
 function comeBack(kind, quote){
   var z = state.zj, o = here(), p = hereState(), forced = kind !== "self" && kind !== "peek";
-  if(forced){ p.caught++; if(p.caught >= ZJ_STRIKES) p.locked = true; }
+  if(forced){ p.caught++; if(p.caught >= ZJ_STRIKES){ p.locked = true; p.freed = false; } }
   var did = p.did;
   z.on = false; p.full = false; p.hair = null; p.did = false; p.game = null; p.q = ""; p.booth = false;
   saveZj();
